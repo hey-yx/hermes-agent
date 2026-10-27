@@ -203,6 +203,39 @@ describe('SidebarSessionRow running arc', () => {
   })
 })
 
+// The selected row must stand out beyond its faint background band: a solid
+// accent bar on the leading edge and a foreground-bright title. Selection was
+// once nearly invisible next to a running row's arc — pin both halves.
+describe('SidebarSessionRow selection marker', () => {
+  const shell = (container: HTMLElement) => container.querySelector('[data-selected]')
+
+  it('marks the selected row with the accent bar and the data flag', () => {
+    const { container } = render(
+      <SidebarSessionRow
+        isPinned={false}
+        isSelected
+        onArchive={noop}
+        onDelete={noop}
+        onPin={noop}
+        onResume={noop}
+        onToggleUnread={noop}
+        session={makeSession({ title: 'Selected' })}
+        unread={false}
+      />
+    )
+
+    const row = shell(container)
+    expect(row).toBeTruthy()
+    expect(row?.className).toContain('before:bg-(--ui-accent)')
+  })
+
+  it('leaves unselected rows unmarked', () => {
+    const { container } = renderRow(makeSession({ title: 'Unselected' }))
+
+    expect(shell(container)).toBeNull()
+  })
+})
+
 describe('SidebarSessionRow', () => {
   afterEach(() => {
     vi.useRealTimers()

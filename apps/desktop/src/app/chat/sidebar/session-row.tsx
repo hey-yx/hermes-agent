@@ -379,6 +379,15 @@ function SidebarSessionRowImpl({
           !card && density !== 'compact' && 'min-h-[2.75rem]',
           !card && density === 'detailed' && 'min-h-[3.875rem]',
           isSelected && 'bg-(--ui-row-active-background)',
+          // Focused marker: a solid accent bar on the leading edge, plus a
+          // brighter title (the row's own label lifts to foreground). Static
+          // — the running row's arc owns motion, this owns position, so the
+          // two states never read as each other.
+          isSelected &&
+            "before:absolute before:inset-y-0.5 before:left-0 before:w-[3px] before:rounded-full before:bg-(--ui-accent) before:content-['']",
+          // The label reads this to lift the title out of --ui-text-secondary;
+          // a plain `text-foreground` here loses to SIDEBAR_ROW_LABEL's own
+          // color utility, a group-data variant does not.
           // Open in another pane: the SAME band, just weaker. Its own mixed
           // token rather than row opacity — dimming the whole row would take
           // the title and the status dot down with it.
@@ -391,6 +400,7 @@ function SidebarSessionRowImpl({
           className
         )}
         data-glass-opaque={dragging ? '' : undefined}
+        data-selected={isSelected ? 'true' : undefined}
         data-working={liveTurn ? 'true' : undefined}
         // The row runs BOTH drags off one press, and each declines outside its
         // own region — so no timing/arbitration rule is needed and neither can
@@ -562,7 +572,7 @@ function SidebarSessionRowImpl({
                     <RowButton className="block w-full text-left">
                       <OverflowTip label={title} placement="row">
                         <SidebarRowLabel
-                          className="hover-marquee block font-normal group-hover:text-foreground group-data-[working=true]:text-foreground/90"
+                          className="hover-marquee block font-normal group-hover:text-foreground group-data-[selected=true]:text-foreground group-data-[working=true]:text-foreground/90"
                           onPointerEnter={armMarquee}
                           onPointerLeave={disarmMarquee}
                         >
