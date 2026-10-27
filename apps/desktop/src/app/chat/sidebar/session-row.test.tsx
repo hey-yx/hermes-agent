@@ -227,6 +227,7 @@ describe('SidebarSessionRow selection marker', () => {
     const row = shell(container)
     expect(row).toBeTruthy()
     expect(row?.className).toContain('before:bg-(--ui-accent)')
+    expect(row?.className).toContain('row-selected-wash')
   })
 
   it('leaves unselected rows unmarked', () => {

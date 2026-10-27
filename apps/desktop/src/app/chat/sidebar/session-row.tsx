@@ -379,6 +379,11 @@ function SidebarSessionRowImpl({
           !card && density !== 'compact' && 'min-h-[2.75rem]',
           !card && density === 'detailed' && 'min-h-[3.875rem]',
           isSelected && 'bg-(--ui-row-active-background)',
+          // The wash: accent sweep strongest at the leading edge, gone by
+          // mid-row. Background-image over the band's background-color, so
+          // the row keeps its flat mark while the left half gains the obvious
+          // gradient the bar anchors to.
+          isSelected && 'row-selected-wash',
           // Focused marker: a solid accent bar on the leading edge, plus a
           // brighter title (the row's own label lifts to foreground). Static
           // — the running row's arc owns motion, this owns position, so the
