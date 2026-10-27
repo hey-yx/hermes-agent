@@ -573,40 +573,12 @@ def _with_entry_pick(params, config):
     return {**params, 'provider': identity}
 
 
-def _heal_bare_custom_pick(params):
-    """*params* with a bare ``custom`` provider pick rewritten to its named entry's identity.
-
-    Bare ``custom`` is the billing class every named ``providers:`` entry resolves to, not a
-    routable identity: frozen as one, the pick reads as a route change and drops the entry's
-    endpoint and credential keys, so the session's first turn dies on ``provider 'custom' resolved
-    without credentials`` (the Desktop leak that pinned a session.info runtime label). Heal the
-    same way the picker (``session_config.model_options``) and the agent build do, so the pick
-    keeps the profile's route. A pick no entry owns — a genuine bare-custom endpoint profile, or an
-    explicit endpoint that is not an entry's — stays as sent: there ``custom`` IS the route.
-    """
-    picked = params.get('provider')
-    if not isinstance(picked, str) or picked.strip().lower() != 'custom':
-        return params
-    model = str(params.get('model') or '').strip() or None
-    base_url = str(params.get('base_url') or '').strip() or None
-    if base_url:
-        # An explicit endpoint decides alone: model ownership must not reroute it to an entry.
-        from hermes_cli.runtime_provider_custom import find_custom_provider_identity
-        healed = find_custom_provider_identity(base_url)
-    else:
-        from hermes_cli.runtime_provider import canonical_custom_identity
-        healed = canonical_custom_identity(model=model)
-    if not healed or healed.strip().lower() == 'custom':
-        return params
-    return {**params, 'provider': healed}
-
-
 def _apply_launch_overrides(params, config):
     """Validate the explicit model/agent launch overrides and fold them into *config*."""
     from urllib.parse import urlsplit
     from hermes_cli.config import resolve_turn_limit
     from hermes_constants import parse_reasoning_effort
-    params = _heal_bare_custom_pick(_with_entry_pick(_without_auto_pick(params), config))
+    params = _with_entry_pick(_without_auto_pick(params), config)
     picks_profile_entry = 'provider' in params and _keeps_profile_route(params['provider'], config)
     if 'provider' in params and not picks_profile_entry:
         model = config.setdefault('model', {})
