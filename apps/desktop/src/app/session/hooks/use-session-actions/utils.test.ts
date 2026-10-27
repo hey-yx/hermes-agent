@@ -203,6 +203,36 @@ describe('applyRuntimeInfo foreground scoping', () => {
   })
 })
 
+describe('applyRuntimeInfo composer model/provider persistence', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+  })
+
+  afterEach(() => {
+    window.localStorage.clear()
+  })
+
+  // The runtime reports a named provider's resolved billing class (`custom`),
+  // and persisting it overwrote the sticky composer pick that a later
+  // session.create pins: the new chat froze `provider: custom` — a class, not a
+  // route — with the entry's endpoint and credential dropped, and its first turn
+  // died on "provider 'custom' resolved without credentials" until the model was
+  // re-picked by hand.
+  it('paints runtime model/provider without overwriting the persisted pick', () => {
+    setCurrentModel('group/smart-mix')
+    setCurrentProvider('custom:magpie')
+
+    applyRuntimeInfo({ model: 'group/smart-mix', provider: 'custom' })
+
+    // The pill mirrors the runtime…
+    expect($currentModel.get()).toBe('group/smart-mix')
+    expect($currentProvider.get()).toBe('custom')
+    // …while the sticky pick a session.create sends survives untouched.
+    expect(localStorage.getItem('hermes.desktop.composer.model')).toBe('group/smart-mix')
+    expect(localStorage.getItem('hermes.desktop.composer.provider')).toBe('custom:magpie')
+  })
+})
+
 describe('applyStoredSessionPreviewRuntimeInfo workspace paint', () => {
   beforeEach(() => {
     setCurrentCwd('/previous-project')

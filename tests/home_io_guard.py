@@ -42,6 +42,12 @@ _INTERPRETER_PREFIXES = tuple({
     # checkout's own .venv is not Hermes state; without this every run from a default install
     # trips on its first traceback.
     Path(__file__).resolve().parent.parent,
+} | {
+    # ...nor is the install payload manifest BESIDE that checkout: pm/environments.
+    # _payload_manifest reads `<checkout>/../manifest.json` to find the venv owning the checkout
+    # (hermes_bootstrap's import-time activate_dependencies), so a default install's gateway
+    # imports trip on it before any test body runs. Exactly that one file, never the home tree.
+    Path(__file__).resolve().parent.parent.parent / "manifest.json",
 })
 # The same prefixes as plain strings for the check() fast path. PurePath comparison folds case on
 # Windows; ``os.path.normcase`` (identity on POSIX) reproduces that for string compares. Prefixes

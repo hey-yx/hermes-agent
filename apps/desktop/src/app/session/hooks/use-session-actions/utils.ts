@@ -36,10 +36,8 @@ import {
   setCurrentBranch,
   setCurrentCwdTransient,
   setCurrentFastMode,
-  setCurrentModel,
   setCurrentModelTransient,
   setCurrentPersonality,
-  setCurrentProvider,
   setCurrentProviderTransient,
   setCurrentReasoningEffort,
   setCurrentReasoningEffortWire,
@@ -2379,12 +2377,21 @@ interface ApplyRuntimeInfoOptions {
 /** Mirror a session's runtime state into the composer atoms the MAIN pane
  *  renders from. Foreground sessions only — see ApplyRuntimeInfoOptions. */
 function publishRuntimeToComposer(state: SessionRuntimeStatePatch): void {
+  // Model/provider mirror the RUNTIME, so they paint transiently: a named
+  // `providers:` entry reports its resolved billing class (`custom`), and
+  // persisting that through setCurrentModel/setCurrentProvider overwrote the
+  // sticky composer pick in localStorage on every create/resume. A later
+  // session.create then pinned `provider: custom` — a class, not a route — and
+  // the gateway froze the new chat with the entry's endpoint and credential
+  // dropped, so its first turn died on "provider 'custom' resolved without
+  // credentials" until the model was re-picked by hand. Only menu picks
+  // (selectModel) and Settings → Model persist.
   if (state.model !== undefined) {
-    setCurrentModel(state.model)
+    setCurrentModelTransient(state.model)
   }
 
   if (state.provider !== undefined) {
-    setCurrentProvider(state.provider)
+    setCurrentProviderTransient(state.provider)
   }
 
   if (state.cwd !== undefined) {
