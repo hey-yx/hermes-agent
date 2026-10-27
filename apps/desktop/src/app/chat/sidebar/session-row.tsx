@@ -379,17 +379,16 @@ function SidebarSessionRowImpl({
           !card && density !== 'compact' && 'min-h-[2.75rem]',
           !card && density === 'detailed' && 'min-h-[3.875rem]',
           isSelected && 'bg-(--ui-row-active-background)',
-          // The wash: accent sweep strongest at the leading edge, gone by
-          // mid-row. Background-image over the band's background-color, so
-          // the row keeps its flat mark while the left half gains the obvious
-          // gradient the bar anchors to.
+          // The wash: accent sweep, strongest at the leading edge and gone by
+          // mid-row, so the mark reads instantly and the right half (age,
+          // chips) stays clean. Background-image over the band's
+          // background-color, so the row keeps its flat full-width mark too.
           isSelected && 'row-selected-wash',
-          // Focused marker: a solid accent bar on the leading edge, plus a
-          // brighter title (the row's own label lifts to foreground). Static
-          // — the running row's arc owns motion, this owns position, so the
-          // two states never read as each other.
-          isSelected &&
-            "before:absolute before:inset-y-0.5 before:left-0 before:w-[3px] before:rounded-full before:bg-(--ui-accent) before:content-['']",
+          // No bar element: the row is rounded, and a straight 3px strip at
+          // the leading edge pokes past the curve. The wash carries the mark
+          // alone, with a brighter title (the row's own label lifts to
+          // foreground). Static — the running row's arc owns motion, this
+          // owns position, so the two states never read as each other.
           // The label reads this to lift the title out of --ui-text-secondary;
           // a plain `text-foreground` here loses to SIDEBAR_ROW_LABEL's own
           // color utility, a group-data variant does not.

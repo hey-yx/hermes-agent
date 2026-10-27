@@ -209,7 +209,7 @@ describe('SidebarSessionRow running arc', () => {
 describe('SidebarSessionRow selection marker', () => {
   const shell = (container: HTMLElement) => container.querySelector('[data-selected]')
 
-  it('marks the selected row with the accent bar and the data flag', () => {
+  it('marks the selected row with the accent wash and the data flag', () => {
     const { container } = render(
       <SidebarSessionRow
         isPinned={false}
@@ -226,8 +226,10 @@ describe('SidebarSessionRow selection marker', () => {
 
     const row = shell(container)
     expect(row).toBeTruthy()
-    expect(row?.className).toContain('before:bg-(--ui-accent)')
     expect(row?.className).toContain('row-selected-wash')
+    // No straight bar element: the row is rounded, and a strip at the leading
+    // edge would poke past the curve — the wash is the whole mark.
+    expect(row?.className).not.toContain('before:w-[3px]')
   })
 
   it('leaves unselected rows unmarked', () => {
