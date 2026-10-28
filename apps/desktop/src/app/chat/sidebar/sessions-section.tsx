@@ -74,7 +74,10 @@ function SidebarSectionHeader({
   const labelBody = (
     <>
       {icon}
-      <SidebarPanelLabel>{label}</SidebarPanelLabel>
+      {/* pl-3 (not the label's own pl-2): the dither dot then centers on the
+          rows' 14px lead cell and the text lands on the shared label column
+          (38px) instead of floating 4px left of every session title below. */}
+      <SidebarPanelLabel className={icon ? undefined : 'pl-3'}>{label}</SidebarPanelLabel>
       {meta && <SidebarSectionMeta>{meta}</SidebarSectionMeta>}
     </>
   )
