@@ -118,6 +118,16 @@ describe('ChatSidebar navigation activity', () => {
     noteActiveTreeGroup(null)
   })
 
+  it('reduces the outer gutter without crowding navigation icons and labels', () => {
+    const { container } = renderSidebar('/kanban', 'extension')
+    const content = container.querySelector('[data-sidebar="content"]')
+    const navigation = screen.getByRole('button', { name: 'Kanban' })
+
+    expect(content?.classList.contains('px-1')).toBe(true)
+    expect(navigation.classList.contains('gap-2')).toBe(true)
+    expect(navigation.querySelector('.size-4')).not.toBeNull()
+  })
+
   it('keeps navigation and session activity coherent with the focused pane', () => {
     renderSidebar('/kanban', 'extension')
     expectOnlyCurrent('Kanban')
