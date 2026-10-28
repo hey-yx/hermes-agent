@@ -123,7 +123,7 @@ describe('ChatSidebar navigation activity', () => {
     const content = container.querySelector('[data-sidebar="content"]')
     const navigation = screen.getByRole('button', { name: 'Kanban' })
 
-    expect(content?.classList.contains('px-1')).toBe(true)
+    expect(content?.classList.contains('px-1.5')).toBe(true)
     expect(navigation.classList.contains('gap-2')).toBe(true)
     expect(navigation.querySelector('.size-4')).not.toBeNull()
   })
