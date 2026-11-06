@@ -237,6 +237,7 @@ class PluginContext(PluginCapabilityCtxMixin):
         # Set when this context's load overran ``plugins.load_timeout_seconds``: the abandoned worker may
         # still be running register(), and nothing it registers from then on may reach a registry.
         self._load_abandoned = False
+        self._staged: list[PluginRegistration] = []  # this load's staged registrations, published if it succeeds
 
     def _abandon_load(self) -> None:
         """Mark this load as timed out; every later ``register_*``/``subscribe``/``on_unload`` is ignored."""
@@ -707,16 +708,15 @@ class PluginContext(PluginCapabilityCtxMixin):
         return handle
 
     def register_context_reference(self, provider) -> None:
-        """Register a :class:`agent.context_references.ContextReferenceProvider`; ``provider.prefix``
-        defines ``@<prefix>:``. Built-in prefixes (diff, staged, file, folder, git, url) are
-        rejected."""
+        """Register a :class:`agent.context_references.ContextReferenceProvider`; ``provider.prefix`` defines
+        ``@<prefix>:``. Built-in prefixes (diff, staged, file, folder, git, url) are rejected."""
         from agent.context_references import (
             ContextReferenceProvider as _CRP, register_context_reference_provider as _register,
         )
         if self._wrong_type(provider, _CRP, "context reference provider"):
             return
         try:
-            _register(provider)
+            self._staged.append(self._manager._track_context_reference(self.manifest, provider, _register))
         except ValueError as exc:
             logger.warning("Plugin '%s' context reference registration failed: %s", self.manifest.name, exc)
             return
@@ -1013,6 +1013,7 @@ class PluginContext(PluginCapabilityCtxMixin):
         logger.debug("Plugin %s subscribed to event: %s", self.manifest.name, event)
 
     from hermes_cli.plugins_content import register_automation_blueprint, register_skill
+    from hermes_cli.plugin_rpc import emit_to_session, register_rpc
 
 # -- scoped provider registrars ------------------------------------------------------------------
 # One generated ``register_<category>_provider`` method per row of plugins_registrars.py's table.
@@ -1111,6 +1112,7 @@ class PluginManager(PluginLoaderMixin, PluginDispatchMixin, PluginLedgerMixin):
         self._plugin_commands: dict[str, dict] = {}
         self._system_prompt_sections: dict[str, PluginSystemPromptSection] = {}
         self._plugin_skills: dict[str, dict[str, Any]] = {}
+        self._plugin_rpc_methods: dict[str, Callable] = {}  # "plugin.<plugin_id>.<name>" -> handler
         self._automation_blueprints: dict[str, Any] = {}  # "<plugin>:<key>" -> AutomationBlueprint
         self._portable_mcp_servers: dict[str, dict[str, Any]] = {}
         self._portable_mcp_server_plugins: dict[str, str] = {}
@@ -1232,8 +1234,6 @@ class PluginManager(PluginLoaderMixin, PluginDispatchMixin, PluginLedgerMixin):
             self._discovered = True
             try:
                 self._discover_and_load_inner()
-                # Persistent registrations survived the unload-all; now that plugins re-registered,
-                # dispose the ones whose plugin did not come back.
                 # Now that plugins have had their chance to re-register, dispose the ones whose plugin did
                 # not come back (disabled, removed, or omitted from this discovery pass) so e.g. a disabled
                 # auth plugin's provider does not stay live process-wide until restart. See #91701.
@@ -1907,7 +1907,7 @@ def clear_thread_tool_whitelist() -> None:
 def _get_pre_tool_call_directive_details(
     tool_name: str, args: Optional[dict[str, Any]], task_id: str = "", session_id: str = "",
     tool_call_id: str = "", turn_id: str = "", api_request_id: str = "",
-    middleware_trace: Optional[list[dict[str, Any]]] = None,
+    middleware_trace: Optional[list[dict[str, Any]]] = None, conversation_id: str = "",
 ) -> _PreToolCallDirective:
     """Check ``pre_tool_call`` hooks for ``{"action": "block", "message"}`` (veto; message becomes
     the tool result) or ``{"action": "approve", "message", "rule_key"?}`` (escalate ANY tool to the
@@ -1923,7 +1923,7 @@ def _get_pre_tool_call_directive_details(
     hook_results = invoke_lifecycle_hook(
         "pre_tool_call", tool_name=tool_name, args=args if isinstance(args, dict) else {},
         task_id=task_id, session_id=session_id, tool_call_id=tool_call_id, turn_id=turn_id,
-        api_request_id=api_request_id, middleware_trace=list(middleware_trace or []),
+        api_request_id=api_request_id, middleware_trace=list(middleware_trace or []), conversation_id=conversation_id,
     )
     modified_args: Optional[dict[str, Any]] = None
     first_approve: Optional[tuple[Optional[str], Optional[str]]] = None  # (message, rule_key)
