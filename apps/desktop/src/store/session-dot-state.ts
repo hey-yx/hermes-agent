@@ -29,6 +29,7 @@ import { stableArray, stableRecord } from '@/lib/stable-array'
 
 import { $backgroundRunningSessionIds } from './composer-status'
 import { $liveWorkRoster, noteEventFed, rosterLiveIds, rosterSaysIdle } from './live-work-roster'
+import { $onScreenStoredSessionId } from './on-screen-session'
 import { $pausedQueueSessionIds } from './owner-queue-reconcile'
 import { $messagingSessions, $sessions, $unreadFinishedSessionIds, lineageAliases } from './session'
 import {
@@ -128,9 +129,10 @@ export const $sessionDotStateById = computed(
     $draftSessionIds,
     $sessions,
     $unreadWriteGuard,
-    $pausedQueueSessionIds
+    $pausedQueueSessionIds,
+    $onScreenStoredSessionId
   ],
-  (attention, working, stalled, background, delegating, unread, draft, sessions, unreadWriteGuard, paused) => {
+  (attention, working, stalled, background, delegating, unread, draft, sessions, unreadWriteGuard, paused, onScreen) => {
     const next: Record<string, SessionDotState> = {}
 
     const claim = (ids: readonly string[], state: SessionDotState) => {
@@ -200,6 +202,22 @@ export const $sessionDotStateById = computed(
     }
 
     claim(attention, 'needs-input')
+
+    // A session the user is LOOKING AT is never "finished — unread": the dot
+    // means "there is something here you have not opened", and the focused chat
+    // contradicts it. Enforced HERE, once, because all four sources (live
+    // marker, persisted marker, seen-count watermark, backend flag) reach the
+    // paint through different ack paths, and whichever one loses a race with a
+    // list refresh re-lit the dot on the chat being read until it was clicked a
+    // second time (#145449, #149809). Only `unread` is dropped: a focused chat
+    // still shows its working / needs-input state.
+    if (onScreen) {
+      for (const alias of lineageAliases(onScreen, sessions)) {
+        if (next[alias] === 'unread') {
+          delete next[alias]
+        }
+      }
+    }
 
     return (dotStates = stableRecord(dotStates, next))
   }

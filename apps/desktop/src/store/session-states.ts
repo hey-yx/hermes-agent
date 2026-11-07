@@ -44,6 +44,7 @@ import { dropStatusDrawersForProfile, migrateStatusDrawersForProfile } from './c
 import { registryConnectionKind } from './connection-registry-state'
 import { recordDislike } from './desktop-metrics'
 import { dialedGatewayModeFor } from './gateway'
+import { $onScreenStoredSessionId } from './on-screen-session'
 import {
   adoptPendingRuntimeTabs,
   dropPreviewTabsForProfile,
@@ -96,6 +97,7 @@ import {
 } from './session-request-router'
 import { orderTilesByTree } from './session-tile-order'
 import { ackStoredSessionId, isMessagingCompletion, markSessionUnreadFinished } from './session-unread'
+import { clearUnreadOnOpen } from './session-unread-remote'
 import { migrateTranscriptTailsForProfile } from './transcript-tail-cache'
 import { isBrowserWindow, isSecondaryWindow } from './windows'
 
@@ -3033,15 +3035,27 @@ function stampTileSessionFocus(focused: null | string) {
 // so this is the one hook that catches every way a tile reaches the front.
 // Clears the whole conversation family (markSessionRead) AND acks the
 // persisted watermark/marker (ackStoredSessionId) so the next list refresh
-// doesn't repaint the dot the user just cleared by looking at it.
+// doesn't repaint the dot the user just cleared by looking at it. The backend's
+// own read flag is the fourth source, and only setSelectedStoredSessionId
+// cleared it — so a session opened in a TILE kept `unread: true` on the server
+// even after it was fronted and read (#145449).
 $focusedStoredSessionId.listen(focused => {
+  // Mirror the view into the leaf atom the unread layers read: they must not
+  // import the focus store themselves (that pulls the pane tree into every
+  // surface that paints a dot), and they need to know which chat is on screen
+  // before deciding whether a row may read unread.
+  $onScreenStoredSessionId.set(focused ?? null)
+
   if (focused) {
     markSessionRead(focused)
     ackStoredSessionId(focused)
+    void clearUnreadOnOpen(focused)
   }
 
   stampTileSessionFocus(focused)
 })
+
+$onScreenStoredSessionId.set($focusedStoredSessionId.get() ?? null)
 
 stampTileSessionFocus($focusedStoredSessionId.get())
 
