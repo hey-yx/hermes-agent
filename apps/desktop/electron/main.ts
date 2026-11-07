@@ -13048,7 +13048,7 @@ function applyTaskFloatPinned(pinned: boolean): boolean {
   taskFloatPinned = Boolean(pinned)
 
   if (taskFloatWindow && !taskFloatWindow.isDestroyed()) {
-    taskFloatWindow.setAlwaysOnTop(taskFloatPinned, taskFloatPinned && IS_MAC ? 'floating' : 'normal')
+    taskFloatWindow.setAlwaysOnTop(taskFloatPinned, taskFloatPinned && IS_MAC ? 'screen-saver' : 'normal')
 
     try {
       taskFloatWindow.setVisibleOnAllWorkspaces(
@@ -13111,7 +13111,7 @@ function spawnTaskFloatWindow() {
 
   taskFloatWindow = win
 
-  win.setAlwaysOnTop(taskFloatPinned, taskFloatPinned && IS_MAC ? 'floating' : 'normal')
+  win.setAlwaysOnTop(taskFloatPinned, taskFloatPinned && IS_MAC ? 'screen-saver' : 'normal')
 
   try {
     win.setVisibleOnAllWorkspaces(

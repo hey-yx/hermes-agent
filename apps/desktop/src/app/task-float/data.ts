@@ -1,15 +1,17 @@
 /**
  * Task-float data layer.
  *
- * Everything comes from the same two doors the rest of the app uses: the
- * gateway JSON-RPC (`host.request`) and the inbound event tap
- * (`onGatewayEvent`). No store scraping, no SQLite reads.
+ * Everything comes from the same two doors the rest of the app uses: gateway
+ * JSON-RPC (`host.request`) and the inbound event tap (`onGatewayEvent`).
  *
- * Sources:
- *   - 会话     `message.complete` events (status: complete / error / interrupted)
+ *   - 会话     `session.active_list` polled. The poll is what makes other
+ *              sessions show up: gateway events are session-scoped, and a
+ *              monitor that never opens a session never hears about one.
+ *              `message.complete` is kept as a supplement for when this window
+ *              does happen to be subscribed.
  *   - 子代理   `subagent.start` + `subagent.complete` events
- *   - 进程     `agents.list` RPC (registry-wide), diffed to spot endings
- *   - 定时任务 `cron.manage` RPC, last_run_at / last_status
+ *   - 进程     `agents.list` (registry-wide), diffed to spot endings
+ *   - 定时任务 `cron.manage`, last_run_at / last_status
  */
 
 import { atom } from 'nanostores'
@@ -30,17 +32,24 @@ export interface TaskItem {
 }
 
 export interface TaskPrefs {
+  /** One line per row: status light and title only. */
+  compact: boolean
   kinds: Record<TaskKind, boolean>
+  /** Keep only what is happening now. */
+  runningOnly: boolean
   showEnded: boolean
 }
 
-const MAX_ITEMS = 16
+const MAX_ITEMS = 24
+const SESSION_POLL_MS = 5000
 const CRON_POLL_MS = 60000
 const PROCESS_POLL_MS = 12000
 const PREFS_KEY = 'hermes.taskFloat.prefs.v1'
 
 const DEFAULT_PREFS: TaskPrefs = {
+  compact: true,
   kinds: { cron: true, proc: true, sub: true, turn: true },
+  runningOnly: false,
   showEnded: false
 }
 
@@ -59,6 +68,9 @@ const SUB_STATUS: Record<string, TaskStatus> = {
   timeout: 'failed'
 }
 
+// LiveSessionStatus: `idle` is the only one with nothing in flight.
+const IDLE = 'idle'
+
 function readPrefs(): TaskPrefs {
   try {
     const raw = JSON.parse(localStorage.getItem(PREFS_KEY) || 'null')
@@ -69,12 +81,14 @@ function readPrefs(): TaskPrefs {
     }
 
     return {
+      compact: raw.compact !== false,
       kinds: {
         cron: kinds.cron !== false,
         proc: kinds.proc !== false,
         sub: kinds.sub !== false,
         turn: kinds.turn !== false
       },
+      runningOnly: raw.runningOnly === true,
       showEnded: raw.showEnded === true
     }
   } catch {
@@ -92,23 +106,22 @@ export function setTaskPrefs(next: TaskPrefs): void {
   }
 }
 
+export function toggleTaskFlag(flag: 'compact' | 'runningOnly' | 'showEnded'): void {
+  const prefs = $taskPrefs.get()
+
+  setTaskPrefs({ ...prefs, [flag]: !prefs[flag] })
+}
+
 export function toggleTaskKind(kind: TaskKind): void {
   const prefs = $taskPrefs.get()
 
   setTaskPrefs({ ...prefs, kinds: { ...prefs.kinds, [kind]: !prefs.kinds[kind] } })
 }
 
-export function toggleShowEnded(): void {
-  const prefs = $taskPrefs.get()
-
-  setTaskPrefs({ ...prefs, showEnded: !prefs.showEnded })
-}
-
 export function pushTaskItem(item: TaskItem): void {
   const rest = $taskItems.get().filter(row => row.key !== item.key)
-  const next = [item, ...rest].sort((a, b) => b.ts - a.ts).slice(0, MAX_ITEMS)
 
-  $taskItems.set(next)
+  $taskItems.set([item, ...rest].sort((a, b) => b.ts - a.ts).slice(0, MAX_ITEMS))
 }
 
 function textHead(value: unknown, max = 64): string {
@@ -119,26 +132,76 @@ function textHead(value: unknown, max = 64): string {
   return line.slice(0, max)
 }
 
+// ── sessions (turns) ────────────────────────────────────────────────────────
+
+// Sessions that were busy on the previous poll. One leaving the set is a turn
+// that just finished, which no event tells this window about.
+let busySessions = new Set<string>()
+
+async function pullSessions(): Promise<void> {
+  try {
+    const res = await host.request<{ sessions?: any[] }>('session.active_list', {})
+    const rows = res?.sessions || []
+    const busy = new Set<string>()
+
+    for (const row of rows) {
+      if (!row?.id) {
+        continue
+      }
+
+      const title = textHead(row.title) || textHead(row.preview) || `会话 ${String(row.id).slice(0, 6)}`
+      const lastActive = Number(row.last_active) * 1000
+
+      if (String(row.status || IDLE) !== IDLE) {
+        busy.add(row.id)
+        pushTaskItem({
+          detail: textHead(row.model, 20),
+          key: `sess:${row.id}`,
+          kind: 'turn',
+          status: 'running',
+          title,
+          ts: Number.isFinite(lastActive) && lastActive > 0 ? lastActive : Date.now()
+        })
+
+        continue
+      }
+
+      if (busySessions.has(row.id)) {
+        pushTaskItem({ detail: '', key: `sess:${row.id}`, kind: 'turn', status: 'done', title, ts: Date.now() })
+      }
+    }
+
+    busySessions = busy
+  } catch {
+    // Gateway not ready yet: stay silent, the next tick tries again.
+  }
+}
+
 function onTurnComplete(event: { payload?: any; session_id?: string }): void {
   const payload = event?.payload || {}
-  const sid = event?.session_id || ''
+
+  if (!event?.session_id) {
+    return
+  }
 
   pushTaskItem({
-    detail: payload.error ? textHead(payload.error, 80) : '',
-    key: `turn:${sid || textHead(payload.text, 24)}`,
+    detail: payload.error ? textHead(payload.error, 60) : '',
+    key: `sess:${event.session_id}`,
     kind: 'turn',
     status: TURN_STATUS[String(payload.status || '')] ?? 'done',
-    title: textHead(payload.text) || (sid ? `会话 ${sid.slice(0, 6)}` : '会话'),
+    title: textHead(payload.text) || `会话 ${String(event.session_id).slice(0, 6)}`,
     ts: Date.now()
   })
 }
+
+// ── subagents ───────────────────────────────────────────────────────────────
 
 function onSubagentStart(event: { payload?: any }): void {
   const payload = event?.payload || {}
   const id = payload.subagent_id || payload.goal || 'subagent'
 
   pushTaskItem({
-    detail: textHead(payload.model, 24),
+    detail: textHead(payload.model, 20),
     key: `sub:${id}`,
     kind: 'sub',
     status: 'running',
@@ -162,6 +225,8 @@ function onSubagentComplete(event: { payload?: any }): void {
   })
 }
 
+// ── cron ────────────────────────────────────────────────────────────────────
+
 async function pullCron(): Promise<void> {
   try {
     const res = await host.request<{ jobs?: any[] }>('cron.manage', { action: 'list', include_disabled: true })
@@ -178,7 +243,7 @@ async function pullCron(): Promise<void> {
       }
 
       pushTaskItem({
-        detail: textHead(job.schedule, 24),
+        detail: textHead(job.schedule, 20),
         key: `cron:${job.job_id}`,
         kind: 'cron',
         status: /err|fail/i.test(String(job.last_status || '')) ? 'failed' : 'done',
@@ -191,7 +256,9 @@ async function pullCron(): Promise<void> {
   }
 }
 
-// Keys seen running on the previous poll — a process that leaves the registry
+// ── background processes ────────────────────────────────────────────────────
+
+// Keys seen running on the previous poll. A process leaving the registry has
 // ended, and `agents.list` carries no exit code, so "ended" is the honest word.
 let liveProcessKeys = new Set<string>()
 
@@ -238,11 +305,7 @@ async function pullProcesses(): Promise<void> {
   }
 }
 
-/**
- * Start collecting. Returns a disposer that stops the timers and the event
- * subscriptions (the float window unmounts when it closes, but a dev reload
- * re-mounts, and double timers would double every row).
- */
+/** Start collecting. Returns a disposer (dev reloads re-mount this shell). */
 export function startTaskCollection(): () => void {
   const disposers = [
     onGatewayEvent('message.complete', onTurnComplete as never),
@@ -250,9 +313,11 @@ export function startTaskCollection(): () => void {
     onGatewayEvent('subagent.complete', onSubagentComplete as never)
   ]
 
+  void pullSessions()
   void pullCron()
   void pullProcesses()
 
+  const sessionTimer = setInterval(() => void pullSessions(), SESSION_POLL_MS)
   const cronTimer = setInterval(() => void pullCron(), CRON_POLL_MS)
   const processTimer = setInterval(() => void pullProcesses(), PROCESS_POLL_MS)
 
@@ -261,6 +326,7 @@ export function startTaskCollection(): () => void {
       dispose()
     }
 
+    clearInterval(sessionTimer)
     clearInterval(cronTimer)
     clearInterval(processTimer)
   }
