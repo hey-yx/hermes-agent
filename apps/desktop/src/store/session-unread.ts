@@ -6,6 +6,7 @@ import { readKey } from '@/lib/storage'
 import { $activeGatewayProfile, normalizeProfileKey } from '@/store/profile'
 import type { SessionInfo } from '@/types/hermes'
 
+import { $onScreenStoredSessionId } from './on-screen-session'
 import { $projectTree } from './project-tree'
 import {
   $cronSessions,
@@ -156,6 +157,14 @@ const rowsFor = (lists: readonly SessionInfo[][]): SessionInfo[] => lists.flat()
 
 const isSelected = (row: SessionInfo, selected: null | string): boolean =>
   Boolean(selected && sessionMatchesStoredId(row, selected))
+
+/** The session the user is LOOKING AT: the focused pane's chat (a ringed tile
+ *  when one is fronted) and the primary selection otherwise. Focus, not
+ *  selection, is what "already opened" means in the two passes below — keyed on
+ *  the selection alone, an on-screen TILE's dot came back on every list refresh
+ *  that re-derived it from the seen-count watermark (#145449), and the write
+ *  that would have silenced it never ran because a tile is never selected. */
+const onScreenSessionId = (): null | string => $onScreenStoredSessionId.get() ?? $selectedStoredSessionId.get()
 
 /** The persistence bucket a row belongs to — its OWN profile, never the live
  *  gateway's (the lists are routinely cross-profile). */
@@ -518,7 +527,7 @@ export function forgetSessionUnread(
  *  up green on first sight. Known, unselected rows are left alone — the gap
  *  between their watermark and live count IS the unread signal. */
 function ingestRows(rows: readonly SessionInfo[]): void {
-  const selected = $selectedStoredSessionId.get()
+  const selected = onScreenSessionId()
   // Only the OWNING profile's row counts as on-screen: a same-id row in
   // another profile is a different session and keeps its unread gap.
   const selectedProfile = selected ? resolveProfile(selected) : null
@@ -610,7 +619,7 @@ function pruneSeenCounts(seen: SeenCounts, rows: readonly SessionInfo[]): SeenCo
  *  brand-new session's first turn isn't flushed to the list until persisted —
  *  are preserved, not dropped. */
 function recomputeUnread(): void {
-  const selected = $selectedStoredSessionId.get()
+  const selected = onScreenSessionId()
   const markers = $unreadFinishedMarkers.get()
   const seen = $sessionSeenCounts.get()
   const unread: string[] = []
@@ -727,6 +736,14 @@ if (!isSecondaryWindow() && !isBrowserWindow()) {
   $sessions.listen(onListChange)
   $cronSessions.listen(onListChange)
   $messagingSessions.listen(onListChange)
+
+  // Where the user is looking changes without any list moving: re-derive on the
+  // view change too, so a dot appears or drops with the pane/tab the user
+  // switches to instead of waiting for the next poll to disagree with it.
+  $onScreenStoredSessionId.listen(() => {
+    ingestRows(rowsFor([$sessions.get(), $cronSessions.get(), $messagingSessions.get()]))
+    recomputeUnread()
+  })
 
   // Opening a session acks it durably (the transient atom is already cleared
   // synchronously by setSelectedStoredSessionId — this is the persisted half).
