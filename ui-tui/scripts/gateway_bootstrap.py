@@ -2,7 +2,7 @@
 the attach ``hermes gateway attach`` runs. The child is a client, never an agent owner.
 
 ``--start`` ensures the owner (first launch). A reconnect discovers only, except ``--recover``
-(a bounded slot, ``gatewayClient.ts`` ``OWNER_RECOVERY_LIMIT`` per window) re-ensures whenever the
+(a bounded slot, ``@hermes/shared/gateway-client`` ``OWNER_RECOVERY_LIMIT`` per window) re-ensures whenever the
 owner is not ready: it crashed, ended by its idle exit, was stopped with ``hermes gateway stop``
 while this TUI was open, or an older Hermes's gateway answers (ensure replaces that one). Main's TUI
 ran its own sidecar and never depended on an external daemon, so an open TUI comes back on its own.
@@ -15,7 +15,7 @@ import sys
 
 # The Python root, not this file's location: the TUI product ships this helper in its own
 # dist/scripts/ (a separate Nix store path), so parents[2] is only right in a source tree.
-# gatewayClient.ts passes the root it put on PYTHONPATH.
+# localGatewayBootstrap.ts passes the root it put on PYTHONPATH.
 def python_root() -> Path:
     return Path(os.environ.get("HERMES_PYTHON_SRC_ROOT") or Path(__file__).resolve().parents[2])
 
@@ -43,11 +43,19 @@ def bootstrap(start: bool, recover: bool = False) -> dict:
         raise ImportError(f"dependency environment unavailable: {exc}") from exc
     from hermes_constants import get_hermes_home
     from hermes_cli.gateway_client import gateway_ws_target
-    from hermes_cli.gateway_runtime_attach import attach_gateway, failure_message, scrub_client_launch_env
+    from hermes_cli.gateway_runtime import GatewayDiscovery
+    from hermes_cli.gateway_runtime_attach import (GatewayAttach, TicketUnavailable, attach_gateway,
+                                                   failure_message, scrub_client_launch_env)
 
     scrub_client_launch_env()
     # The same attach `hermes gateway attach` runs; Ink keeps its own 30 s start budget.
-    attached = attach_gateway(get_hermes_home().resolve(), start=start, recover=recover, timeout=30)
+    try:
+        attached = attach_gateway(get_hermes_home().resolve(), start=start, recover=recover, timeout=30)
+    except TicketUnavailable as exc:
+        # Attachable, then no ticket: the verdict `hermes gateway attach` reports. Ink echoes only its
+        # `gateway inaccessible:` lines inline, the refusal's repair command among them.
+        attached = GatewayAttach(GatewayDiscovery("inaccessible", reason_code="ticket_unavailable",
+                                                  detail=exc.detail or exc.reason))
     if attached.ticket is None:
         raise RuntimeError(failure_message(attached.receipt))
     endpoint = attached.receipt.endpoint
@@ -66,7 +74,7 @@ if __name__ == "__main__":
     # Anything else still exits 1, with a traceback.
     except ImportError as exc:
         # This interpreter cannot load Hermes at all: no reconnect fixes that, so name it
-        # (gatewayClient.ts stops retrying on this verdict).
+        # (Ink stops retrying on this verdict: isTerminalBootstrapFailure).
         print(f"gateway unavailable: bootstrap_dependencies\n{exc}\n{BOOTSTRAP_REMEDY}", file=sys.stderr)
         raise SystemExit(1)
     except (OSError, RuntimeError, ValueError, LookupError, AttributeError, TypeError) as exc:
