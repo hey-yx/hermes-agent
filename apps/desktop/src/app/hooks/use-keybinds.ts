@@ -88,6 +88,7 @@ import {
   switcherJustClosed
 } from '@/store/session-switcher'
 import { toggleStatusbarVisible } from '@/store/statusbar-prefs'
+import { toggleTaskFloat } from '@/store/task-float'
 import { requestThreadPageScroll } from '@/store/thread-scroll'
 import { openNewWindow } from '@/store/windows'
 import { useTheme } from '@/themes/context'
@@ -360,6 +361,7 @@ export function useKeybinds(deps: KeybindRuntimeDeps): void {
     'view.showFiles': showFiles,
     'view.showBrowser': toggleBrowserTab,
     'view.toggleHud': () => toggleHud(hudTargetSessionId()),
+    'view.toggleTaskFloat': () => toggleTaskFloat(),
     'view.showTerminal': () => toggleTerminalPane(),
     // Create first so the pane's open-effect ensure sees a non-empty set and
     // doesn't also spawn one — net effect is exactly one fresh terminal.

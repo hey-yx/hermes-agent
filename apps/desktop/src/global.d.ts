@@ -182,6 +182,16 @@ declare global {
         onCursor: (callback: (point: { x: number; y: number } | null) => void) => () => void
         onGameOverlay: (callback: (state: { active: boolean; app: string }) => void) => () => void
       }
+      // Task float: the always-on-top task monitor. Same full app renderer as
+      // the HUD; main owns the window and whether it is pinned above other
+      // apps. Absent outside the desktop shell.
+      taskFloat?: {
+        open: () => Promise<{ ok: boolean; pinned: boolean }>
+        close: () => Promise<{ ok: boolean }>
+        state: () => Promise<{ open: boolean; pinned: boolean }>
+        setPinned: (pinned: boolean) => Promise<{ ok: boolean; pinned: boolean }>
+        onChanged: (callback: (state: { open: boolean; pinned: boolean }) => void) => () => void
+      }
       // macOS native screenshot gesture; absent on other platforms.
       screenshot?: ScreenshotApi
       hudModifier?: HudModifierApi

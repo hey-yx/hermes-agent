@@ -44,6 +44,7 @@ import {
   Download,
   FileText,
   LayoutDashboard,
+  Monitor,
   PanelBottom,
   PanelTop,
   SlidersHorizontal,
@@ -95,7 +96,8 @@ import { watchSessionPins } from '@/store/session-pin-sync'
 import { $botChatScopes } from '@/store/session-states'
 import { watchUnreadWriteGuard } from '@/store/session-unread-remote'
 import { $statusbarVisible } from '@/store/statusbar-prefs'
-import { isBrowserWindow, isHudWindow } from '@/store/windows'
+import { toggleTaskFloat } from '@/store/task-float'
+import { isBrowserWindow, isHudWindow, isTaskFloatWindow } from '@/store/windows'
 
 import { BrowserPopoutShell } from '../chat/browser-popout-shell'
 import type { SessionDragPayload } from '../chat/composer/inline-refs'
@@ -118,6 +120,7 @@ import { terminalPaletteToggle } from '../right-sidebar/terminal/reveal-focus'
 import { $workspaceIsPage, WORKSPACE_PAGE_HEADER_AREA } from '../routes'
 import { Butterbar } from '../shell/butterbar'
 import { TermsButterbar } from '../shell/terms-butterbar'
+import { TaskFloatShell } from '../task-float/task-float-shell'
 
 import { BASIC_TREE, DEFAULT_TREE, registerLayoutPresets } from './layout-presets'
 import { bindLayoutSides } from './layout-sides'
@@ -360,6 +363,19 @@ registry.registerMany([
       icon: LayoutDashboard,
       keywords: ['layout', 'reset', 'default', 'panes'],
       run: resetLayoutTree
+    } satisfies PaletteContribution
+  },
+  // The always-on-top task monitor. The window restores itself on launch, so
+  // this row is the door back in after it was closed on purpose.
+  {
+    id: 'view.toggleTaskFloat',
+    area: PALETTE_AREA,
+    data: {
+      id: 'view.toggleTaskFloat',
+      label: 'Toggle task monitor',
+      keywords: ['task', 'monitor', 'float', 'window', 'progress', 'running'],
+      icon: Monitor,
+      run: toggleTaskFloat
     } satisfies PaletteContribution
   },
   // Hiding the bar removes the surface that would otherwise offer it back, so
@@ -803,6 +819,17 @@ export function ContribController() {
     return (
       <ContribWiring>
         <BrowserPopoutShell />
+        <PluginPreviewConsentDialog />
+      </ContribWiring>
+    )
+  }
+
+  // The task monitor is another reshaped full renderer: same wiring (gateway,
+  // sessions, event tap), one surface instead of the pane tree.
+  if (isTaskFloatWindow()) {
+    return (
+      <ContribWiring>
+        <TaskFloatShell />
         <PluginPreviewConsentDialog />
       </ContribWiring>
     )

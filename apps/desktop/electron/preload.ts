@@ -192,6 +192,22 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
       return () => ipcRenderer.removeListener('hermes:hud:game-overlay', listener)
     }
   },
+  // Task float: an always-on-top monitor window (`?win=taskfloat`). Same full
+  // app renderer as the HUD, shaped into a single task surface. Main owns the
+  // window and the pin (always-on-top) state; `onChanged` keeps every window's
+  // toggle truthful.
+  taskFloat: {
+    open: () => ipcRenderer.invoke('hermes:taskfloat:open'),
+    close: () => ipcRenderer.invoke('hermes:taskfloat:close'),
+    state: () => ipcRenderer.invoke('hermes:taskfloat:state'),
+    setPinned: (pinned: boolean) => ipcRenderer.invoke('hermes:taskfloat:set-pinned', pinned),
+    onChanged: (callback: (state: { open: boolean; pinned: boolean }) => void) => {
+      const listener = (_event: unknown, state: { open: boolean; pinned: boolean }) => callback(state)
+      ipcRenderer.on('hermes:taskfloat:changed', listener)
+
+      return () => ipcRenderer.removeListener('hermes:taskfloat:changed', listener)
+    }
+  },
   hudModifier: {
     getSettings: () => ipcRenderer.invoke('hermes:hud-modifier:settings:get'),
     setEnabled: enabled => ipcRenderer.invoke('hermes:hud-modifier:settings:set', enabled),

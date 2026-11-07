@@ -99,6 +99,30 @@ export function isBrowserWindow(): boolean {
   return result
 }
 
+// A "taskfloat" window is the always-on-top task monitor: the same full app
+// renderer as the HUD (it needs its own gateway for process/cron/subagent
+// RPCs), shaped by the shell into a single chrome-free surface. Read from
+// location.search, before the hash, same as the flag above.
+let taskFloatWindowCache: boolean | null = null
+
+export function isTaskFloatWindow(): boolean {
+  if (taskFloatWindowCache !== null) {
+    return taskFloatWindowCache
+  }
+
+  let result = false
+
+  try {
+    result = new URLSearchParams(window.location.search).get('win') === 'taskfloat'
+  } catch {
+    result = false
+  }
+
+  taskFloatWindowCache = result
+
+  return result
+}
+
 export function windowBrowserTabId(): null | string {
   try {
     return new URLSearchParams(window.location.search).get('tab')?.trim() || null
@@ -111,7 +135,8 @@ export function windowBrowserTabId(): null | string {
 // session window, the HUD, or a popped-out Browser. Single-claim channels
 // (the quick-entry capture bridge, the pet overlay control bridge) and the
 // install/onboarding overlays belong to the primary alone.
-export const isAuxiliaryWindow = (): boolean => isSecondaryWindow() || isHudWindow() || isBrowserWindow()
+export const isAuxiliaryWindow = (): boolean =>
+  isSecondaryWindow() || isHudWindow() || isBrowserWindow() || isTaskFloatWindow()
 
 // A full peer window renders the ordinary app shell against the backend that
 // Electron already has running. It is not an auxiliary/specialized renderer,

@@ -581,6 +581,8 @@ import { createSshTeardownTracker } from './ssh-teardown'
 import { createStreamThrottle } from './stream-throttle'
 import { registerStreamWorkClock } from './stream-work-clock'
 import { installSystemCaTrust } from './system-ca'
+import { registerTaskFloatIpc } from './task-float-ipc'
+import { defaultTaskFloatBounds, sanitizeTaskFloatBounds, taskFloatBoundsOnScreen } from './task-float-state'
 import { terminalGatewayTarget } from './terminal-gateway-target'
 import { registerTerminalIpc } from './terminal-ipc'
 import { applyTitleBarOverlay, isHexColor, nativeOverlayWidth, titleBarOverlayOptions } from './titlebar-overlay-width'
@@ -13094,6 +13096,230 @@ function broadcastHudState(open) {
   }
 }
 
+// ── Task float window ───────────────────────────────────────────────────────
+// An always-on-top monitor that keeps the task list visible while the user
+// works in another app. It is a FULL app renderer like the HUD (it needs its
+// own gateway for process/cron/subagent RPCs); `?win=taskfloat` only tells the
+// shell to render the single monitor surface instead of the pane tree.
+
+const TASK_FLOAT_STATE_PATH = path.join(app.getPath('userData'), 'task-float-state.json')
+
+let taskFloatWindow: BrowserWindow | null = null
+let taskFloatPinned = true
+let taskFloatPersistTimer: ReturnType<typeof setTimeout> | null = null
+// Whether the monitor should come back on the next cold launch (it is a
+// monitor: users expect it to stay where they left it, open or closed).
+let taskFloatRememberOpen = true
+let taskFloatLastBounds: ReturnType<typeof defaultTaskFloatBounds> | null = null
+
+function readTaskFloatState() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(TASK_FLOAT_STATE_PATH, 'utf8'))
+    const bounds = sanitizeTaskFloatBounds(raw)
+    const areas = screen.getAllDisplays().map(d => d.workArea)
+    const usable = bounds && taskFloatBoundsOnScreen(bounds, areas)
+
+    return {
+      bounds: usable ? bounds : null,
+      open: typeof raw?.open === 'boolean' ? raw.open : true,
+      pinned: typeof raw?.pinned === 'boolean' ? raw.pinned : true
+    }
+  } catch {
+    // First run / unreadable — defaults.
+  }
+
+  return { bounds: null, open: true, pinned: true }
+}
+
+function persistTaskFloatState() {
+  const live = taskFloatWindow && !taskFloatWindow.isDestroyed() ? taskFloatWindow.getNormalBounds() : null
+  const bounds = live && [live.x, live.y, live.width, live.height].every(v => Number.isFinite(v)) ? live : taskFloatLastBounds
+
+  if (!bounds) {
+    return
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(TASK_FLOAT_STATE_PATH), { recursive: true })
+    writeFileAtomic(
+      TASK_FLOAT_STATE_PATH,
+      JSON.stringify({ ...bounds, open: taskFloatRememberOpen, pinned: taskFloatPinned }, null, 2)
+    )
+  } catch (err: any) {
+    rememberLog(`[task-float-state] persist failed: ${err?.message || err}`)
+  }
+}
+
+function scheduleTaskFloatPersist() {
+  if (taskFloatPersistTimer) {
+    clearTimeout(taskFloatPersistTimer)
+  }
+
+  taskFloatPersistTimer = setTimeout(() => {
+    taskFloatPersistTimer = null
+    persistTaskFloatState()
+  }, 400)
+}
+
+function taskFloatBounds() {
+  const state = readTaskFloatState()
+  taskFloatPinned = state.pinned
+  taskFloatRememberOpen = state.open
+
+  if (state.bounds) {
+    return state.bounds
+  }
+
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+
+  return defaultTaskFloatBounds(display?.workArea)
+}
+
+function taskFloatUrl() {
+  const query = '?win=taskfloat'
+
+  if (DEV_SERVER) {
+    return `${DEV_SERVER.endsWith('/') ? DEV_SERVER.slice(0, -1) : DEV_SERVER}/${query}`
+  }
+
+  return `${pathToFileURL(resolveRendererIndex()).toString()}${query}`
+}
+
+function broadcastTaskFloatState() {
+  const payload = {
+    open: Boolean(taskFloatWindow && !taskFloatWindow.isDestroyed()),
+    pinned: taskFloatPinned
+  }
+
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('hermes:taskfloat:changed', payload)
+    }
+  }
+}
+
+/** Pin = float above OTHER apps and follow the user across spaces. Unpinned =
+ *  an ordinary window that still sits above Hermes itself. */
+function applyTaskFloatPinned(pinned: boolean): boolean {
+  taskFloatPinned = Boolean(pinned)
+
+  if (taskFloatWindow && !taskFloatWindow.isDestroyed()) {
+    taskFloatWindow.setAlwaysOnTop(taskFloatPinned, taskFloatPinned && IS_MAC ? 'floating' : 'normal')
+
+    try {
+      taskFloatWindow.setVisibleOnAllWorkspaces(
+        taskFloatPinned,
+        IS_MAC ? { visibleOnFullScreen: true, skipTransformProcessType: true } : undefined
+      )
+    } catch {
+      // Workspace APIs are window-manager capabilities — best effort.
+    }
+  }
+
+  persistTaskFloatState()
+
+  return taskFloatPinned
+}
+
+function spawnTaskFloatWindow() {
+  if (taskFloatWindow && !taskFloatWindow.isDestroyed()) {
+    taskFloatWindow.showInactive()
+    taskFloatWindow.focus()
+    broadcastTaskFloatState()
+
+    return
+  }
+
+  const bounds = taskFloatBounds()
+  taskFloatLastBounds = bounds
+  taskFloatRememberOpen = true
+
+  const win = new BrowserWindow({
+    ...bounds,
+    minWidth: 260,
+    minHeight: 220,
+    title: 'Hermes Tasks',
+    frame: false,
+    transparent: true,
+    resizable: true,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: !IS_MAC,
+    hasShadow: true,
+    alwaysOnTop: true,
+    roundedCorners: true,
+    hiddenInMissionControl: IS_MAC,
+    show: false,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: PRELOAD_PATH,
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      devTools: true,
+      // The point of this window is watching work finish while the user is in
+      // another app; a blurred/throttled renderer would stall the stream.
+      backgroundThrottling: false
+    }
+  })
+
+  taskFloatWindow = win
+
+  win.setAlwaysOnTop(taskFloatPinned, taskFloatPinned && IS_MAC ? 'floating' : 'normal')
+
+  try {
+    win.setVisibleOnAllWorkspaces(
+      taskFloatPinned,
+      IS_MAC ? { visibleOnFullScreen: true, skipTransformProcessType: true } : undefined
+    )
+  } catch {
+    // Best effort (see applyTaskFloatPinned).
+  }
+
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) {
+      // showInactive: opening the monitor must not yank focus out of whatever
+      // the user is doing — it is a read-only glance until they click it.
+      win.showInactive()
+    }
+
+    broadcastTaskFloatState()
+  })
+
+  const captureBounds = () => {
+    if (!win.isDestroyed()) {
+      const live = win.getNormalBounds()
+
+      taskFloatLastBounds = live
+      scheduleTaskFloatPersist()
+    }
+  }
+
+  win.on('moved', captureBounds)
+  win.on('resized', captureBounds)
+  win.on('closed', () => {
+    taskFloatWindow = null
+
+    // A user-initiated close is a decision to stop monitoring; a quit is not.
+    if (!appQuitting) {
+      taskFloatRememberOpen = false
+    }
+
+    persistTaskFloatState()
+    broadcastTaskFloatState()
+  })
+
+  void win.loadURL(taskFloatUrl())
+}
+
+function closeTaskFloatWindow() {
+  if (taskFloatWindow && !taskFloatWindow.isDestroyed()) {
+    taskFloatWindow.close()
+  }
+}
+
 function spawnHudWindow(sessionId, profile) {
   const win = new BrowserWindow({
     ...hudBounds(),
@@ -14333,6 +14559,14 @@ const hudIpc = registerHudIpc({
   setHudSessionId: value => {
     hudSessionId = value
   }
+})
+
+registerTaskFloatIpc({
+  getWindow: () => taskFloatWindow,
+  openWindow: spawnTaskFloatWindow,
+  closeWindow: closeTaskFloatWindow,
+  isPinned: () => taskFloatPinned,
+  setPinned: applyTaskFloatPinned
 })
 
 ipcMain.handle('hermes:backend:recycle', async (_event, profile) => {
@@ -16462,6 +16696,7 @@ const streamThrottle = createStreamThrottle(undefined, undefined, {
   // normal idle throttling contract.
   keepFullscreenPainting: process.platform === 'linux' && linuxOzoneBackend(process.env, process.argv) === 'wayland'
 })
+
 registerStreamWorkClock(ipcMain, sender => BrowserWindow.fromWebContents(sender))
 
 function isAnyTurnInFlight() {
@@ -16488,9 +16723,11 @@ ipcMain.on('hermes:active-work', (event, payload) => {
       event.sender.off('destroyed', forget)
       event.sender.off('render-process-gone', forget)
       activeWorkByWebContents.delete(id)
+
       if (owner) {
         streamThrottle.setVoiceActive(owner, false)
       }
+
       updateStreamThrottleFromActiveWork()
     }
 
@@ -16504,9 +16741,11 @@ ipcMain.on('hermes:active-work', (event, payload) => {
   const work = normalizeActiveWork(payload)
   activeWorkByWebContents.set(id, work)
   lastActiveWorkSeen = work
+
   if (owner?.webContents === event.sender && event.senderFrame === event.sender.mainFrame) {
     streamThrottle.setVoiceActive(owner, payload?.voiceActive === true)
   }
+
   updateStreamThrottleFromActiveWork()
 })
 
@@ -17833,6 +18072,28 @@ app.whenReady().then(() => {
 
   if (_coldStartLink) {
     handleDeepLink(_coldStartLink)
+  }
+
+  // Cold-launch restore for the task monitor. It is a monitor, so it comes
+  // back where the user left it unless they closed it on purpose (that flips
+  // the persisted `open` flag). Waits for the primary window so the first
+  // launch of a run does not race window creation.
+  if (readTaskFloatState().open) {
+    const armTaskFloatRestore = () => {
+      if (isQuittingForHandoff || backendShutdown.hasStarted()) {
+        return
+      }
+
+      if (!mainWindow || mainWindow.isDestroyed()) {
+        setTimeout(armTaskFloatRestore, 500)
+
+        return
+      }
+
+      spawnTaskFloatWindow()
+    }
+
+    setTimeout(armTaskFloatRestore, 800)
   }
 
   app.on('activate', () => {

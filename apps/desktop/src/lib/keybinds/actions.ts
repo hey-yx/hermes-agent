@@ -242,6 +242,8 @@ export const KEYBIND_ACTIONS: readonly KeybindActionMeta[] = [
   // user is working in. Ships bound because the whole point is leaving the app
   // without reaching for it — but the titlebar button is the discoverable door.
   { id: 'view.toggleHud', category: 'view', defaults: ['mod+shift+h'] },
+  // ⌘⇧M — "m" for monitor. Opens/closes the always-on-top task monitor window.
+  { id: 'view.toggleTaskFloat', category: 'view', defaults: ['mod+shift+m'] },
   // Control+` everywhere (literal `ctrl`, NOT `mod`): ⌘` is macOS-reserved for
   // cycling app windows, so VS Code/Cursor/Zed bind the terminal to Ctrl+` on
   // every platform. Off macOS `ctrl` folds to `mod` (= Ctrl), so it's unchanged.

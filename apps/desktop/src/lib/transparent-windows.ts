@@ -3,7 +3,7 @@
 // window) and `browser` are ordinary opaque windows and are deliberately not
 // in here. index.html's pre-paint script skips exactly this list — keep the
 // two in step. No imports: the renderer entry reads it before the app loads.
-export const TRANSPARENT_WINDOWS = new Set(['hud', 'overlay', 'quick', 'wake'])
+export const TRANSPARENT_WINDOWS = new Set(['hud', 'overlay', 'quick', 'wake', 'taskfloat'])
 
 export function isTransparentWindow(search = window.location.search): boolean {
   const win = new URLSearchParams(search).get('win')
