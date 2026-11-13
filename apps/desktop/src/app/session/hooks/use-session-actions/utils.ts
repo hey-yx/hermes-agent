@@ -2141,8 +2141,8 @@ interface ApplyRuntimeInfoOptions {
   owner?: SessionOwnerScope
 }
 
-/** Mirror a session's runtime state into the composer atoms the MAIN pane
- *  renders from. Foreground sessions only — see ApplyRuntimeInfoOptions. */
+/** Paint foreground runtime metadata without persisting its resolved provider
+ *  class/fallback over the user's sticky composer route. */
 function publishRuntimeToComposer(state: SessionRuntimeStatePatch): void {
   // Model/provider mirror the RUNTIME, so they paint transiently: a named
   // `providers:` entry reports its resolved billing class (`custom`), and
